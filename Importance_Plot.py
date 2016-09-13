@@ -1,6 +1,6 @@
 #coding=utf-8
 
-def Importance_Plot(data,label=None,threshold=0):
+def Importance_Plot(data,label=None):
     '''
     :param data: DATAFRAME style
     :param label: y vector
@@ -10,6 +10,7 @@ def Importance_Plot(data,label=None,threshold=0):
     import numpy as np
     import matplotlib.pylab as plt
     from sklearn.ensemble import ExtraTreesClassifier
+    import pandas as pd
     model=ExtraTreesClassifier()
     data1=np.array(data)
     model.fit(data1,label)
@@ -19,11 +20,8 @@ def Importance_Plot(data,label=None,threshold=0):
     namedata=data
     # Print the feature ranking
     print("Feature ranking:")
-    for f in range(data1.shape[1]):
-        if importance[indices[f]]>threshold:
-            print("%d." % (f + 1)), \
-                namedata.columns[indices[f]],'\n','importance:',importance[indices[f]]
-
+    importa=pd.DataFrame({'importance':list(importance[indices]),'Feature name':list(namedata.columns[indices])})
+    print importa
     # Plot the feature importances of the forest
     plt.figure(figsize=(20, 8))
     plt.title("Feature importances")
