@@ -1,0 +1,172 @@
+#coding=utf-8
+% matplotlib inline
+import time,timeit
+import pandas as pd
+import matplotlib.pylab as plt
+import seaborn as sns
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor,GradientBoostingRegressor
+from sklearn.preprocessing import OneHotEncoder #融合模型编码
+from sklearn.cross_validation import train_test_split
+from sklearn.metrics import roc_curve,roc_auc_score,classification_report
+from sklearn.pipeline import make_pipeline #融合模型
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.feature_selection import SelectFromModel
+from pandas import DataFrame
+from sklearn.learning_curve import learning_curve
+from sklearn.ensemble import BaggingRegressor #分批取数据
+from sklearn.externals import joblib
+
+#读取数据
+adress='D:/data/336997.csv'
+df_0 = pd.read_csv(adress, sep=',',parse_dates=[5,18,24,34,62,132,133])
+print df_0.shape
+# df_0.describe()
+
+#评估非数值型数据
+x=list(df_0.columns.values)
+y=list(df_0.describe().columns.values)
+def compare(a,b):
+    x = []
+    if isinstance(a,list) and isinstance(b,list):
+        for i in b:
+            if i in a:
+                a.remove(i)
+                x.append(i)
+        for y in x:
+            b.remove(y)
+    return a + b
+def find_namo(x,y):
+    if len(x) > len(y):
+        print (compare(x,y))
+        return compare(x,y)
+    else:
+        print (compare(y,x))
+        return compare(y,x)
+diff_list=find_namo(x,y)
+
+#正负样本分布
+label_1=df_0.iloc[:,0]
+count_1 = float(label_1.sum())
+count_0 = float(label_1.count() - float(label_1.sum()))
+print ('Cheat:',count_1,'Good:',count_0)
+label_2=df_0.iloc[:,1]
+count_1 = float(label_2.sum())
+count_0 = float(label_2.count() - float(label_2.sum()))
+print ('LOSE:',count_1,'NONE:',count_0)
+
+#基本信息处理
+baseinfo=['maininfo_ordertype','maininfo_orderdate','maininfo_amount',
+          'maininfo_serverfrom','maininfo_clientid','maininfo_subordertype',
+          'ipinfo_ipcountry','ipinfo_ipcity','ipinfo_continent','ipinfo_geocity',
+          'ipinfo_geoprovince','ipinfo_geocountry','deviceidinfo_did','userinfo_uid',
+          'userinfo_signupdate','contactinfo_mobilephoneprovince',
+          'contactinfo_mobilephonecity','paymentinfo_paymentinfoid',
+          'paymentinfo_prepaytype','paymentinfo_amount','paymentinfo_datachange_lasttime',
+          'cardinfo_creditcardtype','cardinfo_ccardnocode','cardinfo_cardbinissue',
+          'cardinfo_isforigencard','ipcityname','ipprovincename','ipcountryname',
+          'cnname']
+print df_0[baseinfo].shape,df_0['maininfo_orderdate'].dtype,df_0['paymentinfo_datachange_lasttime'].dtype
+print df_0['maininfo_orderdate'].head()
+df_0[baseinfo].head(10)
+
+'''处理maininfo_serverfrom订单来源数据'''
+#对其中的多数标签进行数值替换，其他的归为一类
+# - 安卓=1 - iPhone=2 - APP=3 - wap=4 - 电脑网页=5 - 端口=6 - 其他=0
+def change_sf(x):
+    import re
+    pattern_20=re.compile(r'.*?iOS.*?',re.I)#忽略大小写
+    pattern_21=re.compile(r'.*?iphone.*?',re.I)
+    pattern_30=re.compile(r'.*?APP.*?',re.I)
+    pattern_1=re.compile(r'.*?android.*?',re.I)
+    if re.findall(r'^wap/.*?',str(x)):
+        return 4
+    elif re.findall(r'^www\..*?',str(x)):
+        return 5
+    elif re.match(pattern_1,str(x)):
+        return 1
+    elif re.match(pattern_30,str(x)):
+        return 3
+    elif re.findall(r'^\d.*?',str(x)):
+        return 6
+    elif re.match(pattern_20,str(x))or re.match(pattern_21,str(x)):
+        return 2
+    else:
+        return 0
+maininfo_serverfrom_new=df_0[['maininfo_serverfrom']].applymap(change_sf)#注意这里的map函数的使用
+# maininfo_serverfrom_new.head(20) 
+'''处理maininfo_clientid设备ID数据'''  
+#有设备号的为1，没有的为0
+def change_cid(x):
+    import re
+    pattern_0=re.compile(r'NaN',re.I)
+    if re.match(pattern_0,str(x)):
+        return 0
+    else:
+        return 1
+maininfo_clientid_new=df_0[['maininfo_clientid']].applymap(change_cid)
+'''处理NaN空值数据'''
+def change_nan(x):
+    import re
+    pattern_0=re.compile(r'NaN',re.I)
+    if re.match(pattern_0,str(x)):
+        return 0
+    else:
+        return x
+df_0[baseinfo].applymap(change_nan)
+
+'''中文数据分析'''
+'''
+1. 定位地点和IP位置全部有值，判断是否一致：一致=5，不一致=0
+2. 定位地址和IP地址有一个为空值：如果IP为空则=2，如果定位为空=3，如果都为空=1
+3. 定位地址或IP地址是否和手机号码归属地一致：一致=5，不一致=0，有空值：如果归属地为空则=2，如果定位为空=3，如果都为空=1
+'''
+zn=['ipinfo_geocity','ipinfo_geoprovince','ipinfo_geocountry','ipcityname','ipprovincename',
+    'ipcountryname','contactinfo_mobilephoneprovince','contactinfo_mobilephonecity']
+print df_0[zn].head(10)
+
+def location_bi(data):
+    '''
+    把中文地址转换成数值型变量
+    :param data: DataFrame格式
+    :return: new data
+    '''
+    data_new = pd.DataFrame()
+    for i in range(0, 3):
+        temp_1 = data.iloc[:, i]
+        temp_2 = data.iloc[:, i + 3]
+
+        def compare(x, y):
+            '''
+            :param x: IP地址
+            :param y: GPS地址
+            :return: 新数值
+            '''
+            if pd.isnull(x) or pd.isnull(y):
+                if pd.isnull(x) and pd.isnull(y):
+                    return 1
+                elif pd.isnull(x):
+                    return 2
+                else:
+                    return 3
+            else:
+                if x == y:
+                    return 5
+                else:
+                    return 0
+
+        new = map(compare, temp_1, temp_2)
+        new = pd.DataFrame(new, index=data.index, columns=['location' + str(i)])
+        data_new = pd.concat([data_new, new], axis=1)
+    return data_new
+
+loc_new = location_bi(df_0[zn])
+loc_new.head(10)
+
+baseinfo_temp=['maininfo_ordertype','maininfo_subordertype','deviceidinfo_did','userinfo_uid',
+               'userinfo_signupdate','paymentinfo_paymentinfoid','paymentinfo_prepaytype',
+               'paymentinfo_amount','paymentinfo_datachange_lasttime',
+               'cardinfo_creditcardtype','cardinfo_cardbinissue','cardinfo_isforigencard','cnname']
+print df_0[baseinfo_temp].head()
+
+df_0['paymentinfo_prepaytype'].groupby(df_0['paymentinfo_prepaytype']).count()
