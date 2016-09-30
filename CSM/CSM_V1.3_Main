@@ -1,0 +1,65 @@
+
+#read training data
+adress='../../Data_xl/bigtable_2B_xc.csv'
+data,label=Read_data(adress)
+data.head()
+
+#read tst data
+adress1='../../../Data/creditcsore160914.txt'
+data_tst,score=Read_tst(adress1)
+data_tst.head()
+
+#modelling
+import datetime,timeit
+start=datetime.datetime.now()
+
+all_score=calculate_score(data,label,data_tst,score)
+
+end=datetime.datetime.now()
+print (end-start) #calculate the time
+
+#plot the score distribution
+
+all_score.ix[:,-4:].plot(kind='kde')
+
+sns.distplot(score)
+sns.distplot(score_tst)
+plt.show()
+
+# analysis the score
+score_tst=all_score.ix[:,-1]
+score_tst2=np.array(score_tst).ravel()
+sumbtg, sumgtb, sumgtg, sumbtb = 0, 0, 0, 0
+score_np = np.array(score).ravel()
+# all_score=np.array(all_score.ix[:,-1]).ravel()
+for i in range(data_tst.shape[0]):
+    if score_np[i] > 600:
+        if score_tst2[i] < 600:
+            # desgtb.append(score_51[i]-score[i])
+            sumgtb += 1
+        else:
+            sumgtg += 1
+    else:
+        if score_tst2[i] < 600:
+            sumbtb += 1
+        else:
+            # desbtg.append(score_51[i] - score[i])
+            sumbtg += 1
+
+print ('好人变坏人：', sumgtb,round(float(sumgtb)/float(data_tst.shape[0]),3),'坏人变好人：', sumbtg,round(float(sumbtg)/float(data_tst.shape[0]),3))
+
+score_tst2=np.array(score_tst).ravel()
+sumbt, sumgt, sumg, sumb = 0, 0, 0, 0
+score_np = np.array(score).ravel()
+# all_score=np.array(all_score.ix[:,-1]).ravel()
+for i in range(data_tst.shape[0]):
+    if score_np[i] > 600:
+        sumg += 1
+    else:
+        sumb += 1
+    if score_tst2[i]>600:
+        sumgt+=1
+    else:
+        sumbt+=1
+print ('原始分数:','\n','大于600分：',sumg,'小于600分：',sumb)
+print ('现在分数:','\n','大于600分：',sumgt,'小于600分：',sumbt)
