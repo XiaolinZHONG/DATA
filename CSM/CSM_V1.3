@@ -1,0 +1,444 @@
+'''
+使用携程最近的数据测试：
+1. 训练数据中不包括600以下的用户，重新建模来分析
+2. 通过5个类别分别建立模型来打分，其中每个模型使用RF,GBT算法。
+3. 整个程序的结构包括：使用的包+常用的函数+读取数据并简单处理+5个模型
+'''
+###########程序使用的包##########
+import time,timeit
+import pandas as pd
+import matplotlib.pylab as plt
+import seaborn as sns
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor,GradientBoostingRegressor
+from sklearn.preprocessing import OneHotEncoder #融合模型编码
+from sklearn.cross_validation import train_test_split
+from sklearn.metrics import roc_curve,roc_auc_score,classification_report
+from sklearn.pipeline import make_pipeline #融合模型
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.feature_selection import SelectFromModel
+from pandas import DataFrame
+from sklearn.learning_curve import learning_curve
+from sklearn.ensemble import BaggingRegressor #分批取数据
+from sklearn.externals import joblib
+###########程序用的函数##########
+def Importance_Plot(df_2, label):
+    '''
+    :param df: DATAFRAME style
+    :param label: y vector
+    :param threshold: jude threshold
+    :return: figure
+    '''
+    import numpy as np
+    import matplotlib.pylab as plt
+    from sklearn.ensemble import ExtraTreesClassifier
+    from sklearn.feature_selection import SelectFromModel
+    import pandas as pd
+    model = ExtraTreesClassifier()
+    data1 = np.array(df_2)
+    label=np.array(label).ravel()
+    model.fit(data1, label)
+    importance = model.feature_importances_
+    std = np.std([importance for tree in model.estimators_], axis=0)
+    indices = np.argsort(importance)[::-1]
+    namedata = df_2
+    # Print the feature ranking
+    print("Feature ranking:")
+    importa = pd.DataFrame(
+        {'importance': list(importance[indices]), 'Feature name': list(namedata.columns[indices])})
+    print (importa)
+    # Plot the feature importances of the forest
+    plt.figure()
+    plt.title("Feature importances")
+    plt.bar(range(data1.shape[1]), importance[indices],
+            color="g", yerr=std[indices], align="center")
+    plt.xticks(range(data1.shape[1]), indices)
+    plt.xlim([-1, data1.shape[1]])
+    plt.grid(True)
+    plt.show()
+
+    modelnew = SelectFromModel(model, prefit=True)
+    print ('Select feature num:', modelnew.transform(data1).shape[1])
+
+def learn_curve_plot(estimator,title,X,y,cv=None,train_sizes=np.linspace(0.1,1.0,5)):
+    '''
+    :param estimator: the model/algorithem you choose
+    :param title: plot title
+    :param x: train data numpy array style
+    :param y: target data vector
+    :param xlim: axes x lim
+    :param ylim: axes y lim
+    :param cv:
+    :return: the figure
+    '''
+    plt.figure()
+
+    train_sizes,train_scores,test_scores=\
+        learning_curve(estimator,X,y,cv=cv,train_sizes=train_sizes)
+    '''this is the key score function'''
+    train_scores_mean=np.mean(train_scores,axis=1)
+    train_scores_std=np.std(train_scores,axis=1)
+    test_scores_mean=np.mean(test_scores,axis=1)
+    test_scores_std=np.std(test_scores,axis=1)
+
+    plt.fill_between(train_sizes,train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std,alpha=0.1,color='b')
+    plt.fill_between(train_sizes,test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std,alpha=0.1,color='g')
+    plt.plot(train_sizes,train_scores_mean,'o-',color='b',label='training score')
+    plt.plot(train_sizes,test_scores_mean,'o-',color='g',label='cross valid score')
+    plt.xlabel('training examples')
+    plt.ylabel('score')
+    plt.legend(loc='best')
+    plt.grid('on')
+    plt.title(title)
+    plt.show()
+
+def corr_analysis(data):
+    corr=data.corr()
+    #Generate a mask for the upper triangle
+    mask = np.zeros_like(corr, dtype=np.bool)
+    mask[np.triu_indices_from(mask)] = True
+    f, ax = plt.subplots(figsize=(20, 20))
+    # Generate a custom diverging colormap
+    cmap = sns.diverging_palette(110, 10,as_cmap=True)
+    # Draw the heatmap with the mask and correct aspect ratio
+    sns.heatmap(corr, mask=mask, cmap=cmap, vmax=1,linewidths=.5,
+            cbar_kws={"shrink": .6},annot=True,annot_kws={"size":8} )
+    plt.xticks(rotation=90)
+    plt.yticks(rotation=0)
+    plt.show()
+    return corr
+
+def Desc_Scaler(data, des=[0.95], feature_range=(0, 1),detail=False):
+    from sklearn import preprocessing
+    import pandas as pd
+    from pandas import DataFrame
+
+    describe=data.describe(des)
+    if detail==True:
+        print (describe)
+    y=data.shape[1]
+    # print y,describe.columns
+
+    data_new=pd.DataFrame()
+    min_max_scaler = preprocessing.MinMaxScaler(feature_range=feature_range)
+    for i in range(y):
+        threshold=describe.ix[-2,i]
+#         print ('Threshold:',threshold)
+        minval=describe.ix[3,i]
+        maxval=describe.ix[-1,i]
+        temp = data.iloc[:,i]
+
+        # use the map function to discrete data
+        def juge1(x):  # define the function to discrete
+            if x > threshold:
+                return threshold
+            elif x < 0:
+                return 0
+            else:
+                return x
+        def juge2(x):  # define the function to discrete
+            if x > threshold:
+                return threshold
+            else:
+                return x
+        if minval==-1:
+            if maxval==1 or maxval==0:
+                x_temp = temp
+            else:
+                x_temp = temp.apply(juge2)#
+        else:
+            x_temp = temp.apply(juge1)
+        # print pd.Series.to_frame(x_temp)
+        data_new = pd.concat([data_new,pd.Series.to_frame(x_temp)],axis=1)
+    # print data_new.head()
+    # x=min_max_scaler.fit_transform()
+    df_scaler = min_max_scaler.fit_transform(data_new)
+    #     df_scaler=np.round(df_scaler,3)
+    data_new = pd.DataFrame(df_scaler, index=data.index, columns=data.columns)
+
+    print (data_new.head())
+    # for i in range(y):
+    #     sns.distplot(data_new.ix[:,i])
+    #     plt.show()
+    return data_new,min_max_scaler
+
+def Report(label_tst,pre):
+    count_tn,count_fp,count_fn,count_tp=0,0,0,0
+    for i in range(len(label_tst)):
+        if label_tst[i]==0:
+            if pre[i]<0.5:
+                count_tn+=1
+            else:
+                count_fp+=1
+        else:
+            if pre[i]<0.5:
+                count_fn+=1
+            else:
+                count_tp+=1
+    print ('Total:', len(label_tst))
+    print ('FP被分为好人的坏人:', count_fp, 'TN正确分类的坏人:', count_tn, '坏人正确率：',round(float(count_tn)/float((count_fp+count_tn)),3))
+    print ('FN被分为坏人的好人:', count_fn, 'TP正确分类的好人:', count_tp, '好人正确率：',round(float(count_tp)/float((count_fn+count_tp)),3))
+
+def Read_data(adress):
+    df_0 = pd.read_csv(adress, sep=',', dtype={'uid_membertype': str, 'uid_source': str})
+    df_1 = df_0.dropna(how='any')
+    drop = ['uid_source']
+    df_1 = df_1.drop(drop, axis=1)
+    df_1 = df_1[df_1.pro_secretary != 1] #去掉小秘书和机构
+    df_1 = df_1[df_1.pro_agent != 1]
+    df_1 = df_1.ix[:, 1:]
+#     print ('训练数据：','\n',df_1.head())
+    data = df_1.ix[:, :-1]
+    label= df_1[['uid_flag']]
+    print ('Samples shape:', data.shape)
+    count_1 = float(label.sum())
+    count_0 = float(label.count() - float(label.sum()))
+    print ('Good:', count_1, 'Bad:', count_0)
+    return data,label
+
+def Read_tst(adress1):
+    # adress1 = 'D:/project_csm/1.1_tst_data_1.csv'
+    
+    df_0 = pd.read_csv(adress1, sep='\t')
+    drop=['uid_lastlogintime', 'uid_members_idno', 'uid_username', 'uid_realname', 'uid_realidno', 'uid_authenticated_at',
+      'uid_mobilephone', 'uid_signupdate', 'uid_membertype', 'ord_success_last_order_time', 'ord_success_flt_last_order_time',
+      'ord_success_htl_last_order_time', 'ord_success_pkg_last_order_time', 'ord_success_trn_last_order_time']
+    df_0  = df_0.drop(drop,axis=1)
+    df_1 = df_0.dropna(how='any')
+    data = df_1.iloc[:, 1:-1]
+    score = df_1.iloc[:, -1]
+    tem = data[['uid_samemobile', 'uid_haspaypwd',
+                'pro_ismarketing', 'ord_refund_flt_order_count']].applymap(lambda x: np.float(x))
+    drop = ['uid_samemobile', 'uid_haspaypwd', 'pro_ismarketing', 'ord_refund_flt_order_count']
+    data_temp = data.drop(drop, axis=1)
+    data_tst = pd.concat([data_temp, tem], axis=1)
+#     print ('测试数据：','\n',data_tst.head())
+    return data_tst,score
+
+def Modelling(data,label,data_tst=None,score=None):
+    label = np.array(label).ravel()
+    data_trn, data_tst1, label_trn, label_tst = train_test_split(data, label, test_size=0.2)
+    rfr_0 = RandomForestRegressor(random_state=500)
+    rfr_0.fit(data_trn, label_trn)
+    rfr_0_pre = rfr_0.predict(data_tst1)
+    print ('Using random forest regression')
+    print ('AUC-ROC:', roc_auc_score(label_tst, rfr_0_pre))
+    answer = rfr_0_pre > 0.5
+    print (classification_report(label_tst, answer, target_names=['neg', 'pos']))
+    Report(label_tst, rfr_0_pre)
+    gbtr_0 = GradientBoostingRegressor()
+    gbtr_0.fit(data_trn, label_trn)
+    gbtr_0_pre = gbtr_0.predict(data_tst1)
+    print ('Using GBT regression')
+    print ('AUC-ROC:', roc_auc_score(label_tst, gbtr_0_pre))
+    answer = gbtr_0_pre > 0.5
+    print (classification_report(label_tst, answer, target_names=['neg', 'pos']))
+    Report(label_tst, gbtr_0_pre)
+    if data_tst.any:
+        print ('计算训练数据得分')
+        score_rfr  = rfr_0.predict(data_tst) * 500 + 350
+        score_gbtr = gbtr_0.predict(data_tst) * 500 + 350
+        score_gr   = score_rfr * 0.4 + score_gbtr * 0.6
+#         sns.distplot(score, label='Original')
+#         sns.distplot(score_gbtr, label='RFR')
+#         sns.distplot(score_rfr, label='GBTR')
+#         sns.distplot(score_gr, label='GBT+RF')
+#         plt.legend()
+#         plt.show()
+
+        score_rfr = DataFrame(score_rfr, index=score.index, columns=['score_rfr'])
+        score_gbtr = DataFrame(score_gbtr, index=score.index, columns=['score_gbtr'])
+        score_gr = DataFrame(score_gr, index=score.index, columns=['score_gr'])
+        score_all=pd.concat([score, score_rfr, score_gbtr, score_gr], axis=1)
+        print (score_all)
+        # sumbtg, sumgtb, sumgtg, sumbtb = 0, 0, 0, 0
+        # score = np.array(score).ravel()
+        # for i in xrange(data_tst.shape[0]):
+        #     if score[i] > 600:
+        #         if score_rfr[i] < 600:
+        #             # desgtb.append(score_51[i]-score[i])
+        #             sumgtb += 1
+        #         else:
+        #             sumgtg += 1
+        #     else:
+        #         if score_rfr[i] < 600:
+        #             sumbtb += 1
+        #         else:
+        #             # desbtg.append(score_51[i] - score[i])
+        #             sumbtg += 1
+        #
+        # print '好人变坏人：', sumgtb,'坏人变好人：', sumbtg
+        print ('训练结束！')
+        return score_all
+def calculate_score(data,label,data_tst,score):
+    '''
+    计算信用分
+    :param data: 训练数据
+    :param label: 训练标签
+    :param data_tst: 测试数据
+    :param score: 测试数据自带分数
+    :return: 多个计算分数（DATEFRAME格式）
+    '''
+    '''使用people数据'''
+    people=['uid_grade','uid_dealorders','uid_emailvalid','uid_age','uid_mobilevalid',
+            'uid_addressvalid','uid_isindentify','uid_authenticated_days','uid_signupdays',
+            'uid_signmonths','uid_lastlogindays','uid_samemobile','ord_success_order_cmobile_count',
+            'com_mobile_count','pro_generous_stingy_tag','pro_base_active',
+            'pro_customervalue','pro_phone_type','pro_validpoints','pro_htl_consuming_capacity']
+    people_new,convertf_people=Desc_Scaler(data[people])
+    # Importance_Plot(people_new,label)
+    # corr_analysis(people_new)
+    # sns.distplot(people_new.uid_signupdays)
+    # sns.distplot(people_new.uid_authenticated_days)
+    # plt.show()
+    people_tst=convertf_people.transform(data_tst[people])
+    people_score=Modelling(people_new,label,people_tst,score)
+
+    '''使用cosuming数据'''
+    def process_cosum(data):
+        cosuming=['pro_advanced_date','pro_htl_star_prefer',
+                  'pro_ctrip_profits',
+                  'ord_success_max_order_amount','ord_success_avg_leadtime'
+                  ,'ord_cancel_order_count'
+                  ,'ord_success_order_type_count'
+                  ,'ord_success_order_acity_count','ord_success_flt_last_order_days',
+                 'ord_success_flt_max_order_amount','ord_success_flt_avg_order_pricerate'
+                 ,'ord_success_flt_order_acity_count'
+                 ,'ord_success_htl_last_order_days'
+                 ,'ord_success_htl_max_order_amount','ord_success_htl_order_refund_ratio',
+                 'ord_success_htl_guarantee_order_count',
+                 'ord_success_htl_noshow_order_count','ord_cancel_htl_order_count',
+                 'ord_success_trn_last_order_days']
+
+        x1=data.ord_success_order_count # 消费水平均价
+        x2=data.ord_success_order_amount
+        data['ord_success_order_price']=x2/x1
+
+        x1=data.ord_success_first_class_order_count # 高星消费单价
+        x2=data.ord_success_first_class_order_amount
+        data['ord_success_first_class_order_price']=x2/x1
+
+        x1=data.ord_success_aboard_order_count # 舍弃这两个变量
+        x2=data.ord_success_aboard_order_amount
+        data['ord_success_aboard_order_price']=x2/x1
+
+        x1=data.ord_success_flt_first_class_order_count # 头等舱机票单价
+        x2=data.ord_success_flt_first_class_order_amount
+        data['ord_success_flt_first_class_order_price']=x2/x1
+
+        x1=data.ord_success_flt_aboard_order_count # 机票海外单价
+        x2=data.ord_success_flt_aboard_order_amount
+        data['ord_success_flt_aboard_order_price']=x2/x1
+
+        x1=data.ord_success_flt_order_count # 机票消费单价
+        x2=data.ord_success_flt_order_amount
+        data['ord_success_flt_order_price']=x2/x1
+
+        x1=data.ord_success_htl_first_class_order_count # 高星酒店消费单价
+        x2=data.ord_success_htl_first_class_order_amount
+        data['ord_success_htl_first_class_order_price']=x2/x1
+
+        x1=data.ord_success_htl_aboard_order_count # 海外酒店消费均价
+        x2=data.ord_success_htl_aboard_order_amount
+        data['ord_success_htl_aboard_order_price']=x2/x1
+
+        x1=data.ord_success_htl_order_count # 酒店消费均价
+        x2=data.ord_success_htl_order_amount
+        data['ord_success_htl_order_price']=x2/x1
+
+        x1=data.ord_success_trn_order_count # 火车票消费均价
+        x2=data.ord_success_trn_order_amount
+        data['ord_success_trn_order_price']=x2/x1
+        cosuming_new=pd.concat([data[cosuming],data['ord_success_order_price'],
+                                data['ord_success_first_class_order_price'],data['ord_success_aboard_order_price'],
+                                data['ord_success_flt_first_class_order_price'],
+                                data['ord_success_flt_order_price'],data['ord_success_htl_first_class_order_price']
+                                ,data['ord_success_htl_order_price'],
+                                data['ord_success_trn_order_price']],axis=1)
+        cosuming_new=cosuming_new.fillna(0)#
+        return cosuming_new
+
+    cosuming_new=process_cosum(data)
+    cosuming_new,convertf_cosum=Desc_Scaler(cosuming_new)
+    # Importance_Plot(cosuming_new,label)
+    # corr_analysis(cosuming_new)
+    cosuming_tst=process_cosum(data_tst)
+    cosuming_tst=convertf_cosum.transform(cosuming_tst)
+#     cosuming_tst,f=Desc_Scaler(cosuming_tst)
+    cosuming_score=Modelling(cosuming_new,label,cosuming_tst,score)
+
+    '''使用fanacial数据'''
+    def process_fanacial(data):
+        fanacial=['voi_complrefund_count','fai_lackbalance',
+                  'bil_refundord_count','bil_ordertype_count','bil_platform_count',
+                  'pro_htl_star_prefer','pro_htl_consuming_capacity','pro_phone_type','ord_success_max_order_amount',
+                  'ord_total_order_amount','ord_success_flt_first_class_order_count',
+                  'ord_success_trn_max_order_amount'
+                  ,'ord_success_htl_first_class_order_count','ord_success_htl_max_order_amount',
+                  'ord_success_aboard_order_count']
+        x1=data.cap_tmoney_balance
+        x2=data.cap_wallet_balance
+        x3=data.cap_refund_balance
+        x4=data.cap_total_balance
+        data['cap_balance']=x4+x3+x2+x1
+
+        x1=data.bil_paysord_count
+        x2=data.bil_payord_count
+        data['bil_pays_ratio']=x1/x2
+
+        x1=data.bil_paysord_credit_count
+        x2=data.bil_payord_credit_count
+        data['bil_pays_credit_ratio']=x1/x2
+
+        x1=data.bil_paysord_debit_count
+        x2=data.bil_payord_debit_count
+        data['bil_pays_debit_ratio']=x1/x2
+
+        x1=data.ord_success_first_class_order_count # 高星消费单价
+        x2=data.ord_success_first_class_order_amount
+        data['ord_success_first_class_order_price']=x2/x1
+
+        x1=data.ord_success_htl_aboard_order_count # 海外酒店消费均价
+        x2=data.ord_success_htl_aboard_order_amount
+        data['ord_success_htl_aboard_order_price']=x2/x1
+
+
+
+        fanacial_new=pd.concat([data['cap_balance'],data['ord_success_htl_aboard_order_price'],
+                                data['ord_success_first_class_order_price'],data['bil_pays_debit_ratio'],
+                                data['bil_pays_credit_ratio'],data['bil_pays_ratio'],data[fanacial]],axis=1)
+        fanacial_new= fanacial_new.fillna(0)
+        return fanacial_new
+    fanacial_new=process_fanacial(data)
+    fanacial_new,convertf_fanacial=Desc_Scaler(fanacial_new)
+    # Importance_Plot(fanacial_new,label)
+    fanacial_tst=process_fanacial(data_tst)
+    fanacial_tst=convertf_fanacial.transform(fanacial_tst)
+    fanacial_score=Modelling(fanacial_new,label,fanacial_tst,score)
+
+    '''使用interaction数据'''
+    interaction=['voi_complaint_count','voi_complrefund_count','voi_comment_count','acc_loginday_count',
+                 'pro_validpoints','pro_base_active','pro_ctrip_profits','pro_customervalue']
+    interaction_new,converf_interaction=Desc_Scaler(data[interaction])
+    # Importance_Plot(interaction_new,label)
+    relation_tst=converf_interaction.transform(data_tst[interaction])
+    interaction_score=Modelling(interaction_new,label,relation_tst,score)
+
+    '''使用relation数据'''
+    relation=['com_passenger_count','com_idno_count','com_mobile_count',
+              'ord_success_order_cmobile_count']
+    relation_new,converf_relation=Desc_Scaler(data[relation])
+    # Importance_Plot(relation_new,label)
+    relation_tst=converf_relation.transform(data_tst[relation])
+    relation_score=Modelling(relation_new,label,relation_tst,score)
+
+    '''计算全部分数'''
+    score_all = people_score * 0.3 + cosuming_score * 0.25 + fanacial_score * 0.2\
+                + interaction_score * 0.15 + relation_score * 0.1
+    all_score = pd.concat([people_score, cosuming_score, fanacial_score,
+                           interaction_score, relation_score, score_all],
+                          axis=1)
+    print ('打分完成！')
+    return all_score
